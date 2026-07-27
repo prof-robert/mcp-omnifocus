@@ -134,11 +134,17 @@ const jxaListTasks = `(() => {
       project: projName,
       flagged: t.flagged(),
       due: due ? due.toISOString() : null,
-      defer: null, planned: null, estimateMin: null,
+      defer: null, planned: null, estimateMin: null, tags: [],
     };
     try { const d = t.deferDate(); row.defer = d ? d.toISOString() : null; } catch (e) {}
     try { const p = t.plannedDate(); row.planned = p ? p.toISOString() : null; } catch (e) {}
     try { const m = t.estimatedMinutes(); row.estimateMin = m || null; } catch (e) {}
+    // Tags, read-only (v0.8). Added the day a tag became an assignment
+    // convention — "andy rea" on a task marks it as handed to Andy's
+    // co-founder in the collaboration bridge. Degrades to [] if the
+    // spelling differs on some OmniFocus version.
+    // ⚠ VERIFY-ON-MAC: t.tags() and tag.name().
+    try { row.tags = t.tags().map(tg => tg.name()); } catch (e) {}
     tasks.push(row);
   }
   return JSON.stringify(tasks);
@@ -216,6 +222,23 @@ const jxaUpdateTask = `(() => {
     due:         v => { t.dueDate = (v === null ? null : new Date(v)); },
     planned:     v => { t.plannedDate = (v === null ? null : new Date(v)); },
     estimateMin: v => { t.estimatedMinutes = v; },
+    // Tag writes (v0.9), added when board-sync assignment went two-way.
+    // ⚠ VERIFY-ON-MAC: of.add(tag, {to: t.tags}) / of.remove(...) — the
+    // standard-suite add/remove with an insertion container, same family
+    // as the of.move spelling that verified fine for move_project.
+    addTags: v => {
+      for (const name of v) {
+        let tag = doc.flattenedTags().find(x => x.name() === name);
+        if (!tag) { tag = of.Tag({name: name}); doc.tags.push(tag); }
+        of.add(tag, {to: t.tags});
+      }
+    },
+    removeTags: v => {
+      for (const name of v) {
+        const tag = doc.flattenedTags().find(x => x.name() === name);
+        if (tag) { of.remove(tag, {from: t.tags}); }
+      }
+    },
   };
   for (const k of Object.keys(patch)) {
     if (!setters[k]) { out.warnings.push("unknown field: " + k); continue; }
@@ -252,6 +275,47 @@ const jxaSetProjectStatus = `(() => {
   if (lastErr) { return JSON.stringify({ok: false, error: "could not set status: " + lastErr}); }
   const clean = s => String(s).replace(" status", "").replace(/\s+/g, "-");
   return JSON.stringify({ok: true, name: p.name(), status: clean(p.status())});
+})()`
+
+// jxaCreateProject (v0.10) — added the day the board-sync's inbound
+// rule turned out to be unexecutable: "file into a catch-all project,
+// creating it if missing" is only a real rule if project creation
+// exists. Same construction pattern as create_folder (verified live).
+// %s: name, folderId (string or null = top level).
+const jxaCreateProject = `(() => {
+  const of = Application("OmniFocus");
+  const doc = of.defaultDocument;
+  const name = %s;
+  const folderId = %s;
+  let folder = null;
+  if (folderId) {
+    folder = doc.flattenedFolders().find(f => f.id() === folderId);
+    if (!folder) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
+  }
+  const made = of.Project({name: name});
+  (folder ? folder.projects : doc.projects).push(made);
+  return JSON.stringify({ok: true, id: made.id(), name: made.name(), folder: folder ? folder.name() : null});
+})()`
+
+// jxaMoveTask (v0.10) — file an existing task (inbox or elsewhere) into
+// a project. Uses the of.move + insertion-location spelling verified
+// live by move_project.
+// %s: task id, project id.
+const jxaMoveTask = `(() => {
+  const of = Application("OmniFocus");
+  const doc = of.defaultDocument;
+  const taskId = %s;
+  const projectId = %s;
+  const t = doc.flattenedTasks().find(x => x.id() === taskId);
+  if (!t) { return JSON.stringify({ok: false, error: "no task with that id"}); }
+  const p = doc.flattenedProjects().find(x => x.id() === projectId);
+  if (!p) { return JSON.stringify({ok: false, error: "no project with that id"}); }
+  try {
+    of.move(t, {to: p.tasks.beginning});
+  } catch (e) {
+    return JSON.stringify({ok: false, error: "move failed: " + e});
+  }
+  return JSON.stringify({ok: true, name: t.name(), project: p.name()});
 })()`
 
 // VERIFIED-ON-MAC (2026-07): `markComplete` spelling works as-is.

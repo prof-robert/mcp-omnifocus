@@ -53,7 +53,11 @@ if os.path.exists(config_path):
     if content:
         data = json.loads(content)
 
-data.setdefault("mcpServers", {})["omnifocus"] = {"command": binary}
+# Launch via /bin/sh + run.sh rather than the binary directly: run.sh
+# repairs the execute bit and quarantine flag on every start, so a
+# freshly-deployed binary can never fail with "Permission denied".
+runner = os.path.join(os.path.dirname(binary), "run.sh")
+data.setdefault("mcpServers", {})["omnifocus"] = {"command": "/bin/sh", "args": [runner]}
 
 with open(config_path, "w") as f:
     json.dump(data, f, indent=2)

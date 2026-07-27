@@ -215,6 +215,26 @@ func TestBuildPatch(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskTagPatch(t *testing.T) {
+	fb := &fakeBridge{reply: `{"ok":true,"applied":["addTags"]}`}
+	app := &App{Bridge: fb}
+
+	res, _, _ := app.UpdateTask(context.Background(), nil, UpdateTaskInput{
+		ID:         "abc",
+		AddTags:    []string{`andy "rea"`}, // hostile quotes on purpose
+		RemoveTags: []string{"waiting"},
+	})
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", text(res))
+	}
+	if !strings.Contains(fb.lastScript, `\"rea\"`) {
+		t.Errorf("tag name not JSON-encoded:\n%s", fb.lastScript)
+	}
+	if !strings.Contains(fb.lastScript, `"addTags"`) || !strings.Contains(fb.lastScript, `"removeTags"`) {
+		t.Errorf("tag patch keys missing:\n%s", fb.lastScript)
+	}
+}
+
 func TestUpdateTaskValidation(t *testing.T) {
 	fb := &fakeBridge{}
 	app := &App{Bridge: fb}
@@ -347,6 +367,32 @@ func TestMoveProjectEncodesAndDefaultsToTopLevel(t *testing.T) {
 	_, _, _ = app.MoveProject(context.Background(), nil, MoveProjectInput{ProjectID: "p1", FolderID: "f9"})
 	if !strings.Contains(fb.lastScript, `"f9"`) {
 		t.Errorf("folder id not passed through:\n%s", fb.lastScript)
+	}
+}
+
+func TestCreateProjectAndMoveTaskValidation(t *testing.T) {
+	fb := &fakeBridge{reply: `{"ok":true}`}
+	app := &App{Bridge: fb}
+
+	res, _, _ := app.CreateProject(context.Background(), nil, CreateProjectInput{Name: "  "})
+	if !res.IsError {
+		t.Fatal("blank project name must error in-band")
+	}
+	res, _, _ = app.MoveTask(context.Background(), nil, MoveTaskInput{ProjectID: "p1"})
+	if !res.IsError {
+		t.Fatal("missing taskId must error in-band")
+	}
+	if fb.lastScript != "" {
+		t.Fatal("must not shell out on invalid input")
+	}
+
+	_, _, _ = app.CreateProject(context.Background(), nil, CreateProjectInput{Name: `From "Andy R"`, FolderID: "f1"})
+	if !strings.Contains(fb.lastScript, `\"Andy R\"`) || !strings.Contains(fb.lastScript, `"f1"`) {
+		t.Errorf("create_project args wrong:\n%s", fb.lastScript)
+	}
+	_, _, _ = app.MoveTask(context.Background(), nil, MoveTaskInput{TaskID: "t1", ProjectID: "p1"})
+	if !strings.Contains(fb.lastScript, `"t1"`) || !strings.Contains(fb.lastScript, `"p1"`) {
+		t.Errorf("move_task args wrong:\n%s", fb.lastScript)
 	}
 }
 

@@ -65,8 +65,10 @@ type UpdateTaskInput struct {
 	Flagged     *bool  `json:"flagged,omitempty" jsonschema:"set or clear the flag"`
 	Defer       string `json:"defer,omitempty" jsonschema:"new defer date-time (YYYY-MM-DD HH:MM), or the word clear to remove it"`
 	Due         string `json:"due,omitempty" jsonschema:"new due date-time, or clear"`
-	Planned     string `json:"planned,omitempty" jsonschema:"new planned (intended do-date) date-time, or clear"`
-	EstimateMin *int   `json:"estimateMin,omitempty" jsonschema:"estimated duration in minutes; 0 clears it"`
+	Planned     string   `json:"planned,omitempty" jsonschema:"new planned (intended do-date) date-time, or clear"`
+	EstimateMin *int     `json:"estimateMin,omitempty" jsonschema:"estimated duration in minutes; 0 clears it"`
+	AddTags     []string `json:"addTags,omitempty" jsonschema:"tag names to add to the task; a tag that doesn't exist yet is created"`
+	RemoveTags  []string `json:"removeTags,omitempty" jsonschema:"tag names to remove from the task; unknown names are ignored"`
 }
 
 // Folder inputs (v0.7). Note what's NOT here: no delete, no hide. The
@@ -83,6 +85,16 @@ type CreateFolderInput struct {
 type RenameFolderInput struct {
 	ID   string `json:"id" jsonschema:"the OmniFocus folder id, as returned by list_folders"`
 	Name string `json:"name" jsonschema:"the folder's new name"`
+}
+
+type CreateProjectInput struct {
+	Name     string `json:"name" jsonschema:"the new project's name"`
+	FolderID string `json:"folderId,omitempty" jsonschema:"create inside the folder with this id (from list_folders); omit for the top level"`
+}
+
+type MoveTaskInput struct {
+	TaskID    string `json:"taskId" jsonschema:"the OmniFocus task id, as returned by a FRESH list_tasks call (inbox tasks appear there too)"`
+	ProjectID string `json:"projectId" jsonschema:"destination project id, from list_projects"`
 }
 
 type MoveProjectInput struct {
@@ -125,6 +137,12 @@ func buildPatch(in UpdateTaskInput) map[string]any {
 		} else {
 			patch["estimateMin"] = *in.EstimateMin
 		}
+	}
+	if len(in.AddTags) > 0 {
+		patch["addTags"] = in.AddTags
+	}
+	if len(in.RemoveTags) > 0 {
+		patch["removeTags"] = in.RemoveTags
 	}
 	return patch
 }
@@ -283,6 +301,38 @@ func (a *App) RenameFolder(ctx context.Context, req *mcp.CallToolRequest, in Ren
 	return textResult(out), nil, nil
 }
 
+func (a *App) CreateProject(ctx context.Context, req *mcp.CallToolRequest, in CreateProjectInput) (*mcp.CallToolResult, any, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return errResult(fmt.Errorf("name must not be empty")), nil, nil
+	}
+	var folder any // null = top level
+	if in.FolderID != "" {
+		folder = in.FolderID
+	}
+	script := fmt.Sprintf(jxaCreateProject, mustJSON(name), mustJSON(folder))
+	out, err := a.Bridge.RunJXA(ctx, script)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	return textResult(out), nil, nil
+}
+
+func (a *App) MoveTask(ctx context.Context, req *mcp.CallToolRequest, in MoveTaskInput) (*mcp.CallToolResult, any, error) {
+	if in.TaskID == "" {
+		return errResult(fmt.Errorf("taskId must not be empty")), nil, nil
+	}
+	if in.ProjectID == "" {
+		return errResult(fmt.Errorf("projectId must not be empty")), nil, nil
+	}
+	script := fmt.Sprintf(jxaMoveTask, mustJSON(in.TaskID), mustJSON(in.ProjectID))
+	out, err := a.Bridge.RunJXA(ctx, script)
+	if err != nil {
+		return errResult(err), nil, nil
+	}
+	return textResult(out), nil, nil
+}
+
 func (a *App) MoveProject(ctx context.Context, req *mcp.CallToolRequest, in MoveProjectInput) (*mcp.CallToolResult, any, error) {
 	if in.ProjectID == "" {
 		return errResult(fmt.Errorf("projectId must not be empty")), nil, nil
@@ -309,7 +359,7 @@ func Register(server *mcp.Server, app *App) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tasks",
-		Description: "List incomplete OmniFocus tasks, optionally filtered to one project or to flagged tasks only. Returns id, name, project, flagged, due, defer, planned date and estimated minutes for each (null where unset or unsupported).",
+		Description: "List incomplete OmniFocus tasks, optionally filtered to one project or to flagged tasks only. Returns id, name, project, flagged, due, defer, planned date, estimated minutes and tags (tag names, read-only) for each (null/empty where unset or unsupported).",
 	}, app.ListTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -319,7 +369,7 @@ func Register(server *mcp.Server, app *App) {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_task",
-		Description: "Update fields on an existing OmniFocus task by id: rename, note, flag, defer/planned/due date-times (pass the word clear to remove one), estimated minutes (0 clears). Only provided fields change. Prefer this over recreate-and-complete when rescheduling.",
+		Description: "Update fields on an existing OmniFocus task by id: rename, note, flag, defer/planned/due date-times (pass the word clear to remove one), estimated minutes (0 clears), and add/remove tags by name (addTags creates missing tags). Only provided fields change. Prefer this over recreate-and-complete when rescheduling.",
 	}, app.UpdateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -346,6 +396,16 @@ func Register(server *mcp.Server, app *App) {
 		Name:        "rename_folder",
 		Description: "Rename an OmniFocus folder, identified by the id from list_folders. Renaming is the only change to an existing folder this server supports — folders cannot be deleted or hidden.",
 	}, app.RenameFolder)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_project",
+		Description: "Create a new OmniFocus project, optionally inside a folder (folderId from list_folders). Check list_projects first — duplicate names are allowed but rarely wanted. Projects cannot be deleted through this server.",
+	}, app.CreateProject)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "move_task",
+		Description: "File an existing task into a project (taskId from a fresh list_tasks — inbox tasks included; projectId from list_projects). Only the task's location changes. Prefer this over recreate-and-complete when a task landed in the wrong place.",
+	}, app.MoveTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "move_project",
