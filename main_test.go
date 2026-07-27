@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -402,4 +403,24 @@ func TestServerRegistersAllTools(t *testing.T) {
 	// (the SDK panics at AddTool time if a struct can't become a schema).
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "0.0.0"}, nil)
 	Register(server, &App{Bridge: &fakeBridge{reply: "[]"}})
+}
+
+func TestSchemasHaveNoNullableUnions(t *testing.T) {
+	// Regression for a field-found bug: jsonschema-go emits
+	// type: ["null","array"] for slices, some MCP clients degrade that
+	// union to untyped and serialise arrays as strings, and our own
+	// validator then rejects the call. schemaFor must collapse every
+	// union so addTags/removeTags advertise as plain arrays.
+	b, err := json.Marshal(schemaFor[UpdateTaskInput]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if strings.Contains(s, `"null"`) {
+		t.Errorf("nullable union survived collapse:\n%s", s)
+	}
+	if !strings.Contains(s, `"addTags":{"type":"array","items":{"type":"string"}`) &&
+		!strings.Contains(s, `"addTags":{"items":{"type":"string"}`) {
+		t.Errorf("addTags not a plain array of strings:\n%s", s)
+	}
 }

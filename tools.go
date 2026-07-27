@@ -21,8 +21,47 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// schemaFor generates the input schema for T and collapses the
+// nullable unions jsonschema-go emits for Go slices and maps
+// (e.g. type: ["null","array"]) into plain types.
+//
+// LESSON (field-found): some MCP clients can't represent a union type
+// — they degrade the field to untyped, then serialise the model's
+// array as a string, which our own validator promptly rejects. Both
+// ends behave "correctly"; the union in the middle breaks the call.
+// For optional fields, absent already means null, so the union buys
+// nothing — collapse it and every client agrees on the type again.
+func schemaFor[T any]() *jsonschema.Schema {
+	s, err := jsonschema.For[T](nil)
+	if err != nil {
+		panic(err)
+	}
+	collapseNullable(s)
+	return s
+}
+
+func collapseNullable(s *jsonschema.Schema) {
+	if s == nil {
+		return
+	}
+	if len(s.Types) == 2 {
+		switch {
+		case s.Types[0] == "null":
+			s.Type, s.Types = s.Types[1], nil
+		case s.Types[1] == "null":
+			s.Type, s.Types = s.Types[0], nil
+		}
+	}
+	for _, p := range s.Properties {
+		collapseNullable(p)
+	}
+	collapseNullable(s.Items)
+	collapseNullable(s.AdditionalProperties)
+}
 
 // App carries dependencies for every handler. Injecting the Bridge here
 // (rather than using a global) is what makes the fake-bridge tests work.
@@ -354,61 +393,73 @@ func (a *App) MoveProject(ctx context.Context, req *mcp.CallToolRequest, in Move
 func Register(server *mcp.Server, app *App) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_projects",
+		InputSchema: schemaFor[ListProjectsInput](),
 		Description: "List OmniFocus projects with ids, names, statuses, defer dates (ISO 8601, null if none) and the folder each lives in (null if top-level). Active-status projects with a future defer date are scheduled, not currently live — treat the defer date as authoritative for availability.",
 	}, app.ListProjects)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_tasks",
+		InputSchema: schemaFor[ListTasksInput](),
 		Description: "List incomplete OmniFocus tasks, optionally filtered to one project or to flagged tasks only. Returns id, name, project, flagged, due, defer, planned date, estimated minutes and tags (tag names, read-only) for each (null/empty where unset or unsupported).",
 	}, app.ListTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_tasks",
+		InputSchema: schemaFor[AddTasksInput](),
 		Description: "Add tasks to OmniFocus from TaskPaper. Supports @flagged, @defer(datetime), @due(datetime) and indented notes as real task properties, and files tasks under an existing project via the project parameter or container lines. Reports any project names that don't exist instead of misfiling — on that error, call list_projects and retry with exact names.",
 	}, app.AddTasks)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "update_task",
+		InputSchema: schemaFor[UpdateTaskInput](),
 		Description: "Update fields on an existing OmniFocus task by id: rename, note, flag, defer/planned/due date-times (pass the word clear to remove one), estimated minutes (0 clears), and add/remove tags by name (addTags creates missing tags). Only provided fields change. Prefer this over recreate-and-complete when rescheduling.",
 	}, app.UpdateTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "complete_task",
+		InputSchema: schemaFor[CompleteTaskInput](),
 		Description: "Mark a single OmniFocus task complete, identified by the id returned from list_tasks.",
 	}, app.CompleteTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "set_project_status",
+		InputSchema: schemaFor[SetProjectStatusInput](),
 		Description: "Set an OmniFocus project's status to active or on-hold, identified by the id from list_projects (call it with includeAll to see on-hold projects). Only these two statuses are supported — this tool cannot complete or drop a project. Returns the project's name and resulting status.",
 	}, app.SetProjectStatus)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "list_folders",
+		InputSchema: schemaFor[ListFoldersInput](),
 		Description: "List OmniFocus folders with their ids, names, parent folder name (null for top-level folders) and full path (e.g. 'Family / Finances / Frugal living'), in tree order. Use this to see the folder hierarchy before creating folders or moving projects.",
 	}, app.ListFolders)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_folder",
+		InputSchema: schemaFor[CreateFolderInput](),
 		Description: "Create a new OmniFocus folder, optionally inside an existing folder (parentId from list_folders). Check list_folders first — OmniFocus allows duplicate folder names but they're rarely wanted. Folders cannot be deleted or hidden through this server.",
 	}, app.CreateFolder)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "rename_folder",
+		InputSchema: schemaFor[RenameFolderInput](),
 		Description: "Rename an OmniFocus folder, identified by the id from list_folders. Renaming is the only change to an existing folder this server supports — folders cannot be deleted or hidden.",
 	}, app.RenameFolder)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_project",
+		InputSchema: schemaFor[CreateProjectInput](),
 		Description: "Create a new OmniFocus project, optionally inside a folder (folderId from list_folders). Check list_projects first — duplicate names are allowed but rarely wanted. Projects cannot be deleted through this server.",
 	}, app.CreateProject)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "move_task",
+		InputSchema: schemaFor[MoveTaskInput](),
 		Description: "File an existing task into a project (taskId from a fresh list_tasks — inbox tasks included; projectId from list_projects). Only the task's location changes. Prefer this over recreate-and-complete when a task landed in the wrong place.",
 	}, app.MoveTask)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "move_project",
+		InputSchema: schemaFor[MoveProjectInput](),
 		Description: "File an OmniFocus project into a folder (projectId from list_projects, folderId from list_folders), or move it to the top level by omitting folderId. Only the project's location changes — its tasks, dates and status are untouched.",
 	}, app.MoveProject)
 }
