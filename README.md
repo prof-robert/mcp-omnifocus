@@ -8,10 +8,18 @@ installed, you can talk to Claude about your tasks in plain English and it
 can see and organise them for you — plan your day, file tasks into
 projects, reschedule things, tick things off.
 
-Everything runs **entirely on your Mac**. No cloud service, no account, no
-data sent anywhere — Claude talks to a tiny program on your machine, and
-that program talks to OmniFocus through Apple's own automation system
-(macOS will ask your permission the first time).
+The server runs **entirely on your Mac** — no extra cloud service, no
+separate account, no middleman. Claude talks to a tiny program on your
+machine, and that program talks to OmniFocus through Apple's own
+automation system (macOS will ask your permission the first time).
+
+One data path exists, and it's the same one you already use: whatever
+you ask Claude to read (project names, tasks, dates) is processed by
+Claude's models via Anthropic — exactly like anything you type into a
+Claude chat. If you're comfortable telling Claude about your tasks,
+this changes nothing but the typing. (MCP is an open protocol, so the
+server also works with local-model clients if you want a loop that
+never leaves your machine.)
 
 ## What you can say to Claude
 
@@ -59,9 +67,11 @@ Twelve focused capabilities:
   delete or hide *folders* — deliberately excluded.
 - **It only touches OmniFocus.** It has no access to your files, other
   apps, or the internet.
-- **It's local and private.** The server is a single program running as
-  you, on your Mac, speaking to Claude over a private pipe. Your task data
-  never leaves your machine through this tool.
+- **The server is local; the data path is the one you already trust.**
+  The server is a single program running as you, on your Mac, speaking
+  to your Claude app over a private pipe — it sends nothing anywhere
+  itself. What you ask Claude to read is processed by Anthropic like any
+  Claude conversation; no *other* party ever sees anything.
 - **macOS guards it.** The first use triggers Apple's automation
   permission prompt — nothing happens until you approve, and you can
   revoke it any time in System Settings → Privacy & Security → Automation.

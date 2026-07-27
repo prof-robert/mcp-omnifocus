@@ -312,12 +312,7 @@ func (a *App) CreateFolder(ctx context.Context, req *mcp.CallToolRequest, in Cre
 	if name == "" {
 		return errResult(fmt.Errorf("name must not be empty")), nil, nil
 	}
-	var parent any // null when unset → top-level folder
-	if in.ParentID != "" {
-		parent = in.ParentID
-	}
-	script := fmt.Sprintf(jxaCreateFolder, mustJSON(name), mustJSON(parent))
-	out, err := a.Bridge.RunJXA(ctx, script)
+	out, err := a.Bridge.RunJXA(ctx, scriptCreateFolder(name, in.ParentID))
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -345,12 +340,7 @@ func (a *App) CreateProject(ctx context.Context, req *mcp.CallToolRequest, in Cr
 	if name == "" {
 		return errResult(fmt.Errorf("name must not be empty")), nil, nil
 	}
-	var folder any // null = top level
-	if in.FolderID != "" {
-		folder = in.FolderID
-	}
-	script := fmt.Sprintf(jxaCreateProject, mustJSON(name), mustJSON(folder))
-	out, err := a.Bridge.RunJXA(ctx, script)
+	out, err := a.Bridge.RunJXA(ctx, scriptCreateProject(name, in.FolderID))
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -364,8 +354,7 @@ func (a *App) MoveTask(ctx context.Context, req *mcp.CallToolRequest, in MoveTas
 	if in.ProjectID == "" {
 		return errResult(fmt.Errorf("projectId must not be empty")), nil, nil
 	}
-	script := fmt.Sprintf(jxaMoveTask, mustJSON(in.TaskID), mustJSON(in.ProjectID))
-	out, err := a.Bridge.RunJXA(ctx, script)
+	out, err := a.Bridge.RunJXA(ctx, scriptMoveTask(in.TaskID, in.ProjectID))
 	if err != nil {
 		return errResult(err), nil, nil
 	}
@@ -376,12 +365,7 @@ func (a *App) MoveProject(ctx context.Context, req *mcp.CallToolRequest, in Move
 	if in.ProjectID == "" {
 		return errResult(fmt.Errorf("projectId must not be empty")), nil, nil
 	}
-	var folder any // null = move to top level
-	if in.FolderID != "" {
-		folder = in.FolderID
-	}
-	script := fmt.Sprintf(jxaMoveProject, mustJSON(in.ProjectID), mustJSON(folder))
-	out, err := a.Bridge.RunJXA(ctx, script)
+	out, err := a.Bridge.RunJXA(ctx, scriptMoveProject(in.ProjectID, in.FolderID))
 	if err != nil {
 		return errResult(err), nil, nil
 	}

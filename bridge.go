@@ -277,46 +277,126 @@ const jxaSetProjectStatus = `(() => {
   return JSON.stringify({ok: true, name: p.name(), status: clean(p.status())});
 })()`
 
-// jxaCreateProject (v0.10) — added the day the board-sync's inbound
-// rule turned out to be unexecutable: "file into a catch-all project,
-// creating it if missing" is only a real rule if project creation
-// exists. Same construction pattern as create_folder (verified live).
-// %s: name, folderId (string or null = top level).
-const jxaCreateProject = `(() => {
+// ─────────────────────────────────────────────────────────────────────────────
+// Container operations via Omni Automation (v0.11).
+//
+// Field history worth keeping: the AppleScript-dictionary route
+// (of.move, folder.projects.push) failed with nil-container errors on
+// EVERY spelling — objects fetched through flattened* lookups don't
+// resolve as insertion containers. The fix was not another spelling but
+// another DIALECT: OmniFocus embeds its own official automation
+// JavaScript ("Omni Automation"), reachable from JXA via
+// evaluateJavascript, with purpose-built moveTasks/moveSections/
+// positional constructors. When an app offers a first-party automation
+// API, use it — the AppleScript bridge is the emulation layer.
+//
+// omniInner runs an Omni Automation script inside OmniFocus and returns
+// its result (the inner script must return a JSON string).
+// ⚠ VERIFY-ON-MAC: evaluateJavascript spelling, Task/Project/
+// Folder.byIdentifier, moveTasks, moveSections, positional constructors.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// omniOuter wraps an inner Omni Automation script (passed JSON-encoded)
+// for execution via osascript.
+const omniOuter = `(() => {
   const of = Application("OmniFocus");
-  const doc = of.defaultDocument;
-  const name = %s;
-  const folderId = %s;
-  let folder = null;
-  if (folderId) {
-    folder = doc.flattenedFolders().find(f => f.id() === folderId);
-    if (!folder) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
-  }
-  const made = of.Project({name: name});
-  (folder ? folder.projects : doc.projects).push(made);
-  return JSON.stringify({ok: true, id: made.id(), name: made.name(), folder: folder ? folder.name() : null});
+  return of.evaluateJavascript(%s);
 })()`
 
-// jxaMoveTask (v0.10) — file an existing task (inbox or elsewhere) into
-// a project. Uses the of.move + insertion-location spelling verified
-// live by move_project.
-// %s: task id, project id.
-const jxaMoveTask = `(() => {
-  const of = Application("OmniFocus");
-  const doc = of.defaultDocument;
-  const taskId = %s;
-  const projectId = %s;
-  const t = doc.flattenedTasks().find(x => x.id() === taskId);
-  if (!t) { return JSON.stringify({ok: false, error: "no task with that id"}); }
-  const p = doc.flattenedProjects().find(x => x.id() === projectId);
-  if (!p) { return JSON.stringify({ok: false, error: "no project with that id"}); }
-  try {
-    of.move(t, {to: p.tasks.beginning});
-  } catch (e) {
-    return JSON.stringify({ok: false, error: "move failed: " + e});
+// omniResolveProject is the OA-side helper for the id dialect gap:
+// AppleScript reports a project's id as its ROOT TASK's id, while
+// Project.byIdentifier wants the project's own key. Resolve by every
+// route so ids from list_projects always work.
+const omniResolveProject = `
+  const resolveProject = (id) => {
+    let p = null;
+    try { p = Project.byIdentifier(id); } catch (e) {}
+    if (!p) { try { const t = Task.byIdentifier(id); if (t && t.containingProject) { p = t.containingProject; } } catch (e) {} }
+    if (!p) { try { p = flattenedProjects.find(pr => pr.task && pr.task.id.primaryKey === id) || null; } catch (e) {} }
+    return p;
+  };
+`
+
+// scriptCreateProject builds the full osascript for creating a project,
+// positionally inside a folder when folderId is given.
+func scriptCreateProject(name string, folderID string) string {
+	inner := fmt.Sprintf(`(() => {
+  const name = %s;
+  const folderId = %s;
+  let pos = library.ending;
+  if (folderId) {
+    const f = Folder.byIdentifier(folderId);
+    if (!f) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
+    pos = f;
   }
-  return JSON.stringify({ok: true, name: t.name(), project: p.name()});
-})()`
+  const p = new Project(name, pos);
+  // Report the ROOT TASK's key as the id — that's the AppleScript-flavour
+  // id list_projects returns, keeping the id-join consistent everywhere.
+  const outId = (p.task && p.task.id) ? p.task.id.primaryKey : p.id.primaryKey;
+  return JSON.stringify({ok: true, id: outId, name: p.name, folder: folderId ? p.parentFolder.name : null});
+})()`, mustJSON(name), mustJSON(orNull(folderID)))
+	return fmt.Sprintf(omniOuter, mustJSON(inner))
+}
+
+// scriptCreateFolder builds the osascript for creating a folder,
+// optionally inside a parent folder.
+func scriptCreateFolder(name string, parentID string) string {
+	inner := fmt.Sprintf(`(() => {
+  const name = %s;
+  const parentId = %s;
+  let pos = library.ending;
+  if (parentId) {
+    const f = Folder.byIdentifier(parentId);
+    if (!f) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
+    pos = f;
+  }
+  const made = new Folder(name, pos);
+  return JSON.stringify({ok: true, id: made.id.primaryKey, name: made.name, parent: parentId ? made.parent.name : null});
+})()`, mustJSON(name), mustJSON(orNull(parentID)))
+	return fmt.Sprintf(omniOuter, mustJSON(inner))
+}
+
+// scriptMoveTask builds the osascript for filing a task into a project
+// via Omni Automation's moveTasks.
+func scriptMoveTask(taskID, projectID string) string {
+	inner := fmt.Sprintf(`(() => {`+omniResolveProject+`
+  const t = Task.byIdentifier(%s);
+  if (!t) { return JSON.stringify({ok: false, error: "no task with that id"}); }
+  const p = resolveProject(%s);
+  if (!p) { return JSON.stringify({ok: false, error: "no project with that id (tried direct, root-task and scan resolution)"}); }
+  moveTasks([t], p);
+  return JSON.stringify({ok: true, name: t.name, project: p.name});
+})()`, mustJSON(taskID), mustJSON(projectID))
+	return fmt.Sprintf(omniOuter, mustJSON(inner))
+}
+
+// scriptMoveProject builds the osascript for filing a project into a
+// folder (or the top level) via Omni Automation's moveSections.
+func scriptMoveProject(projectID, folderID string) string {
+	inner := fmt.Sprintf(`(() => {`+omniResolveProject+`
+  const p = resolveProject(%s);
+  if (!p) { return JSON.stringify({ok: false, error: "no project with that id (tried direct, root-task and scan resolution)"}); }
+  const folderId = %s;
+  let pos = library.ending;
+  let folderName = null;
+  if (folderId) {
+    const f = Folder.byIdentifier(folderId);
+    if (!f) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
+    pos = f; folderName = f.name;
+  }
+  moveSections([p], pos);
+  return JSON.stringify({ok: true, name: p.name, folder: folderName});
+})()`, mustJSON(projectID), mustJSON(orNull(folderID)))
+	return fmt.Sprintf(omniOuter, mustJSON(inner))
+}
+
+// orNull maps Go's empty string to JSON null for optional ids.
+func orNull(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
 
 // VERIFIED-ON-MAC (2026-07): `markComplete` spelling works as-is.
 const jxaCompleteTask = `(() => {
@@ -372,8 +452,15 @@ const jxaCreateFolder = `(() => {
     if (!parent) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
   }
   const made = of.Folder({name: name});
-  (parent ? parent.folders : doc.folders).push(made);
-  return JSON.stringify({ok: true, id: made.id(), name: made.name(), parent: parent ? parent.name() : null});
+  const containers = parent
+    ? [["parent.folders", () => parent.folders], ["parent.sections", () => parent.sections]]
+    : [["doc.folders", () => doc.folders], ["doc.sections", () => doc.sections]];
+  const errs = [];
+  for (const [label, get] of containers) {
+    try { get().push(made); return JSON.stringify({ok: true, id: made.id(), name: made.name(), parent: parent ? parent.name() : null, via: label}); }
+    catch (e) { errs.push(label + ": " + e); }
+  }
+  return JSON.stringify({ok: false, error: "could not insert folder — " + errs.join(" | ")});
 })()`
 
 const jxaRenameFolder = `(() => {
@@ -404,10 +491,15 @@ const jxaMoveProject = `(() => {
     folder = doc.flattenedFolders().find(f => f.id() === folderId);
     if (!folder) { return JSON.stringify({ok: false, error: "no folder with that id"}); }
   }
-  try {
-    of.move(p, {to: folder ? folder.projects.beginning : doc.projects.beginning});
-  } catch (e) {
-    return JSON.stringify({ok: false, error: "move failed: " + e});
+  // Field-found: folder-level containers spell as "sections" — try the
+  // plausible destinations in order and report which one took.
+  const targets = folder
+    ? [["folder.sections.beginning", () => folder.sections.beginning], ["folder.sections.end", () => folder.sections.end], ["folder.projects.beginning", () => folder.projects.beginning]]
+    : [["doc.sections.beginning", () => doc.sections.beginning], ["doc.projects.beginning", () => doc.projects.beginning]];
+  const errs = [];
+  for (const [label, get] of targets) {
+    try { of.move(p, {to: get()}); return JSON.stringify({ok: true, name: p.name(), folder: folder ? folder.name() : null, via: label}); }
+    catch (e) { errs.push(label + ": " + e); }
   }
-  return JSON.stringify({ok: true, name: p.name(), folder: folder ? folder.name() : null});
+  return JSON.stringify({ok: false, error: "move failed — " + errs.join(" | ")});
 })()`

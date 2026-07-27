@@ -310,8 +310,8 @@ func TestCreateFolderValidatesAndEncodes(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("unexpected tool error: %s", text(res))
 	}
-	if !strings.Contains(fb.lastScript, `\"A\"`) {
-		t.Errorf("folder name not JSON-encoded in script:\n%s", fb.lastScript)
+	if !strings.Contains(fb.lastScript, `\\\"A\\\"`) {
+		t.Errorf("folder name not JSON-encoded (nested) in script:\n%s", fb.lastScript)
 	}
 	if !strings.Contains(fb.lastScript, "const parentId = null") {
 		t.Errorf("missing parent should splice as null:\n%s", fb.lastScript)
@@ -319,7 +319,7 @@ func TestCreateFolderValidatesAndEncodes(t *testing.T) {
 
 	// With a parent, the id must be passed through encoded.
 	_, _, _ = app.CreateFolder(context.Background(), nil, CreateFolderInput{Name: "Subarea", ParentID: "pf-123"})
-	if !strings.Contains(fb.lastScript, `"pf-123"`) {
+	if !strings.Contains(fb.lastScript, "pf-123") {
 		t.Errorf("parent id not passed through:\n%s", fb.lastScript)
 	}
 }
@@ -366,7 +366,7 @@ func TestMoveProjectEncodesAndDefaultsToTopLevel(t *testing.T) {
 	}
 
 	_, _, _ = app.MoveProject(context.Background(), nil, MoveProjectInput{ProjectID: "p1", FolderID: "f9"})
-	if !strings.Contains(fb.lastScript, `"f9"`) {
+	if !strings.Contains(fb.lastScript, "f9") {
 		t.Errorf("folder id not passed through:\n%s", fb.lastScript)
 	}
 }
@@ -388,12 +388,18 @@ func TestCreateProjectAndMoveTaskValidation(t *testing.T) {
 	}
 
 	_, _, _ = app.CreateProject(context.Background(), nil, CreateProjectInput{Name: `From "Andy R"`, FolderID: "f1"})
-	if !strings.Contains(fb.lastScript, `\"Andy R\"`) || !strings.Contains(fb.lastScript, `"f1"`) {
+	if !strings.Contains(fb.lastScript, "Andy R") || !strings.Contains(fb.lastScript, "f1") {
 		t.Errorf("create_project args wrong:\n%s", fb.lastScript)
 	}
+	if !strings.Contains(fb.lastScript, "evaluateJavascript") {
+		t.Errorf("create_project should use Omni Automation:\n%s", fb.lastScript)
+	}
 	_, _, _ = app.MoveTask(context.Background(), nil, MoveTaskInput{TaskID: "t1", ProjectID: "p1"})
-	if !strings.Contains(fb.lastScript, `"t1"`) || !strings.Contains(fb.lastScript, `"p1"`) {
+	if !strings.Contains(fb.lastScript, "t1") || !strings.Contains(fb.lastScript, "p1") {
 		t.Errorf("move_task args wrong:\n%s", fb.lastScript)
+	}
+	if !strings.Contains(fb.lastScript, "moveTasks") {
+		t.Errorf("move_task should use Omni Automation moveTasks:\n%s", fb.lastScript)
 	}
 }
 
