@@ -1,6 +1,6 @@
 ---
 name: omnifocus
-description: How to work with this user's OmniFocus via the omnifocus MCP tools (list_projects, list_tasks, add_tasks, update_task, complete_task, set_project_status, list_folders, create_folder, rename_folder, move_project). Use whenever OmniFocus comes up, and also when the user asks what to work on, wants a plan or meeting outcomes captured as tasks, says "add this to my tasks", asks to tick something off, or wants help prioritising, focusing or planning their week — even if they don't name OmniFocus explicitly.
+description: How to work with this user's OmniFocus via the omnifocus MCP tools (list_projects, list_tasks, add_tasks, update_task, complete_task, set_project_status, create_project, move_task, list_folders, create_folder, rename_folder, move_project). Use whenever OmniFocus comes up, and also when the user asks what to work on, wants a plan or meeting outcomes captured as tasks, says "add this to my tasks", asks to tick something off, or wants help prioritising, focusing or planning their week — even if they don't name OmniFocus explicitly.
 ---
 
 <!--
@@ -20,10 +20,10 @@ description: How to work with this user's OmniFocus via the omnifocus MCP tools 
 
 # Working with my OmniFocus
 
-The omnifocus MCP server exposes ten tools: `list_projects`, `list_tasks`,
-`add_tasks` (TaskPaper in), `update_task`, `complete_task`,
-`set_project_status`, `list_folders`, `create_folder`, `rename_folder`,
-`move_project`. This skill is the judgement layer: my structure and
+The omnifocus MCP server exposes twelve tools: `list_projects`,
+`list_tasks`, `add_tasks` (TaskPaper in), `update_task`, `complete_task`,
+`set_project_status`, `create_project`, `move_task`, `list_folders`,
+`create_folder`, `rename_folder`, `move_project`. This skill is the judgement layer: my structure and
 conventions, so changes land the way I'd have made them.
 
 ## My structure

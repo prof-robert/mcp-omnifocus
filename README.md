@@ -30,7 +30,7 @@ Once installed, things like this just work:
 
 ## What it can do (and what it can't)
 
-Ten focused capabilities:
+Twelve focused capabilities:
 
 | Tool | What it does |
 |---|---|
@@ -40,6 +40,8 @@ Ten focused capabilities:
 | `update_task` | Change fields on one task — rename, reschedule, flag, set/clear dates, set duration |
 | `complete_task` | Mark one task complete |
 | `set_project_status` | Set a project to **active** or **on-hold** — nothing else |
+| `create_project` | Create a project, optionally inside a folder |
+| `move_task` | File an existing task (inbox included) into a project |
 | `list_folders` | See your folder structure |
 | `create_folder` | Create a folder, optionally inside another |
 | `rename_folder` | Rename a folder — the only change to an existing folder it supports |
